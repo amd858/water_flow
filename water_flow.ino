@@ -10,27 +10,32 @@
 #define MANUAL_LED 9 // set
 #define BIG_BOTTLE_LED 10 // set
 
+
+
 #define SHORT_MAX_BOUNCE_COUNT 3 
 #define LONG_MAX_BOUNCE_COUNT 300
 
-#define PUMP_INACTIVE_DURATION 60000 // 10 minuets
-// #define PUMP_INACTIVE_DURATION 6000 // 1 minuets
+#define DIM_LED_BRIGHTNES 30
+#define FULL_LED_BRIGHTNES 255
 
-#define NUMBER_OFF_WATER_FLOW 6000 // 1 minuets
 #define NUMBER_OFF_WATER_PAUSE_DURATION 500 //dont change
-#define NUMBER_OFF_FILL_CYCLES 22
+
+
+
+#define PUMP_FALSE_START_ALLOWANCE 3000 // 30 SECOND
+#define PUMP_INACTIVE_DURATION 4000 // 40 SECOND
+#define MAX_WATER_FILLING_COUNT 6240 // 1 minuets
+#define NUMBER_OFF_FILL_CYCLES 8
+
+// #define PUMP_INACTIVE_DURATION 4000 // 30 SECONDS
+// #define MAX_WATER_FILLING_COUNT 1000 // 10 SECONDS
+// #define NUMBER_OFF_FILL_CYCLES 3
+
+
 
 
 
 int global_fill_cycles = 0;
-
-unsigned long big_bottle_fill_counter = 0;
-unsigned long tic;
-unsigned long startTics; // Variable to hold the start time
-
-unsigned long counter_for_inactive_pump_tic = 0;
-
-bool activity_flag = false;
 
 enum dispenserPumpStates
 {
@@ -144,13 +149,13 @@ void setup() {
     pinMode(MANUAL_LED, OUTPUT);
     pinMode(BIG_BOTTLE_LED, OUTPUT);
     pinMode(ORANGE_LED, OUTPUT);
+    pinMode(LED_BUILTIN, OUTPUT);
+
 
     Serial.begin(115200);
 
     int eepromAddress = 0;
     int readValue = 0;
-
-
 
     if (readIntFromEEPROM(eepromAddress, readValue)) {
         Serial.print("Value read from EEPROM: ");
@@ -175,6 +180,9 @@ void loop() {
 
     bottleFillingProcess(pump_active);
     delay(10);
+    
+
+
 
 }
 
@@ -188,7 +196,7 @@ void bottleButtonProcessing(bool big_bottle_button_presed) {
         if (big_bottle_button_presed) {
             bottle_button_state = BOTTLE_BUTTON_BOUNCE_BEFORE_PRESED_STATE;
             bottleButtonBounceCounter = 0;
-            analogWrite(ORANGE_LED, 255);
+            analogWrite(MANUAL_LED, DIM_LED_BRIGHTNES);
         }
 
         break;
@@ -198,10 +206,7 @@ void bottleButtonProcessing(bool big_bottle_button_presed) {
                 bottle_button_state = BOTTLE_BUTTON_PRESED_STATE;
                 writeIntToEEPROM(0, int(NUMBER_OFF_FILL_CYCLES));
                 global_fill_cycles = NUMBER_OFF_FILL_CYCLES;
-                Serial.print("bottle button pressed global_fill_cycles:");
-                Serial.println(global_fill_cycles);
-                analogWrite(ORANGE_LED, 0);
-                analogWrite(BIG_BOTTLE_LED, 50);
+                analogWrite(MANUAL_LED, FULL_LED_BRIGHTNES);
             }
             else {
                 bottleButtonBounceCounter++;
@@ -209,7 +214,7 @@ void bottleButtonProcessing(bool big_bottle_button_presed) {
         }
         else {
             bottle_button_state = BOTTLE_BUTTON_UNPRESED_STATE;
-            analogWrite(ORANGE_LED, 0);
+            analogWrite(MANUAL_LED, 0);
 
         }
         break;
@@ -225,7 +230,7 @@ void bottleButtonProcessing(bool big_bottle_button_presed) {
         if (!big_bottle_button_presed) {
             if (bottleButtonBounceCounter >= SHORT_MAX_BOUNCE_COUNT) {
                 bottle_button_state = BOTTLE_BUTTON_UNPRESED_STATE;
-                Serial.println("bottle button unpresed");
+                analogWrite(MANUAL_LED, 0);
             }
             else {
                 bottleButtonBounceCounter++;
@@ -248,28 +253,26 @@ void resetButtonProcessing(bool reset_button_pressed) {
         if (reset_button_pressed) {
             reset_button_state = RESET_BUTTON_BOUNCE_BEFORE_PRESED_STATE;
             resetButtonBounceCounter = 0;
+            analogWrite(MANUAL_LED, DIM_LED_BRIGHTNES);
         }
         break;
     case RESET_BUTTON_BOUNCE_BEFORE_PRESED_STATE:
         if (reset_button_pressed) {
             if (resetButtonBounceCounter >= LONG_MAX_BOUNCE_COUNT) {
 
-                analogWrite(ORANGE_LED, 255);
                 global_fill_cycles = 0;
+                writeIntToEEPROM(0, global_fill_cycles);
                 reset_button_state = RESET_BUTTON_PRESED_STATE;
                 dispenser_bigbottle_fill_state = BIG_BOTTLE_WAITING_STATE;
-                // Serial.println("\033[H\033[J");
-                Serial.print("reset button pressed global_fill_cycles:");
-                Serial.println(global_fill_cycles);
-
+                analogWrite(MANUAL_LED, FULL_LED_BRIGHTNES);
             }
             else {
                 resetButtonBounceCounter++;
-                analogWrite(ORANGE_LED, 100);
             }
         }
         else {
             reset_button_state = RESET_BUTTON_UNPRESED_STATE;
+            analogWrite(MANUAL_LED, 0);
         }
         break;
     case RESET_BUTTON_PRESED_STATE:
@@ -282,11 +285,8 @@ void resetButtonProcessing(bool reset_button_pressed) {
     case RESET_BUTTON_BOUNCE_BEFORE_UNPRESED_STATE:
         if (!reset_button_pressed) {
             if (resetButtonBounceCounter >= SHORT_MAX_BOUNCE_COUNT) {
-
-                analogWrite(ORANGE_LED, 0);
-
+                analogWrite(MANUAL_LED, 0);
                 reset_button_state = RESET_BUTTON_UNPRESED_STATE;
-                Serial.println("reset button unpresed");
             }
             else {
                 resetButtonBounceCounter++;
@@ -360,7 +360,7 @@ void manualButtonProcessing(bool manual_button_pressed) {
 
 
 void bottleFillingProcess(bool pump_active) { //bottle fiilng pro
-    static int pumpInActiveCounter = 0;
+    static int pumpInactiveCounter = 0;
     static int fillsCounter = 0;
     static int waitCounter = 0;
 
@@ -369,21 +369,22 @@ void bottleFillingProcess(bool pump_active) { //bottle fiilng pro
     {
     case PUMP_ACTIVE_STATE:
         if (!pump_active) {
-            pumpInActiveCounter = 0;
+            pumpInactiveCounter = 0;
             dispenser_Pump_State = BOUNCE_BEFORE_PUMP_INACTIVE_STATE;
         }
         break;
 
     case BOUNCE_BEFORE_PUMP_INACTIVE_STATE:
         if (!pump_active) {
-            if (pumpInActiveCounter >= PUMP_INACTIVE_DURATION)
+            if (pumpInactiveCounter >= PUMP_INACTIVE_DURATION)
             {
                 dispenser_Pump_State = PUMP_INACTIVE_STATE;
-                pumpInActiveCounter = 0;
+                digitalWrite(ORANGE_LED,HIGH);
+                pumpInactiveCounter = 0;
             }
             else {
-                pumpInActiveCounter++;
-                Serial.println(float(pumpInActiveCounter) / 100, 1);
+                pumpInactiveCounter++;
+                Serial.println(float(pumpInactiveCounter) / 100, 1);
             }
         }
         else {
@@ -395,19 +396,20 @@ void bottleFillingProcess(bool pump_active) { //bottle fiilng pro
     case PUMP_INACTIVE_STATE:
         if (pump_active) {
             dispenser_Pump_State = BOUNCE_BEFORE_PUMP_ACTIVE_STATE;
-            pumpInActiveCounter = 0;
+            pumpInactiveCounter = 0;
         }
         break;
 
     case BOUNCE_BEFORE_PUMP_ACTIVE_STATE:
 
         if (pump_active) {
-            if (pumpInActiveCounter >= SHORT_MAX_BOUNCE_COUNT) {
+            if (pumpInactiveCounter >= PUMP_FALSE_START_ALLOWANCE) {
                 dispenser_Pump_State = PUMP_ACTIVE_STATE;
-                Serial.println("PUMP_ACTIVE_STATE");
+                digitalWrite(ORANGE_LED,LOW);
+
             }
             else {
-                pumpInActiveCounter++;
+                pumpInactiveCounter++;
             }
         }
         else {
@@ -424,50 +426,38 @@ void bottleFillingProcess(bool pump_active) { //bottle fiilng pro
     switch (dispenser_bigbottle_fill_state)
     {
     case BIG_BOTTLE_STOP_STATE:
-        if (dispenser_Pump_State == PUMP_INACTIVE_STATE) {
-            if (global_fill_cycles > 0)
-            {
+
+        if (global_fill_cycles > 0) {
+            analogWrite(BIG_BOTTLE_LED, DIM_LED_BRIGHTNES);
+            if (dispenser_Pump_State == PUMP_INACTIVE_STATE || dispenser_Pump_State == BOUNCE_BEFORE_PUMP_ACTIVE_STATE) {
                 digitalWrite(SOLENOID_VALVE_PIN, HIGH);
-                digitalWrite(BIG_BOTTLE_LED, HIGH);
+                analogWrite(BIG_BOTTLE_LED, FULL_LED_BRIGHTNES);
+                writeIntToEEPROM(0, --global_fill_cycles);
                 dispenser_bigbottle_fill_state = BIG_BOTTLE_FILLING_STATE;
-                Serial.print(" BIG_BOTTLE_STOP_STATE global_fill_cycles: ");
-                Serial.println(global_fill_cycles);
             }
         }
 
         break;
     case BIG_BOTTLE_FILLING_STATE:
-        if (fillsCounter >= NUMBER_OFF_WATER_FLOW) {
+        if (fillsCounter >= MAX_WATER_FILLING_COUNT) {
             dispenser_bigbottle_fill_state = BIG_BOTTLE_WAITING_STATE;
-            Serial.print("global_fill_cycles: ");
-            Serial.println(global_fill_cycles);
-            writeIntToEEPROM(0, global_fill_cycles--);
             digitalWrite(SOLENOID_VALVE_PIN, LOW);
-            analogWrite(BIG_BOTTLE_LED, 50);
-
+            analogWrite(BIG_BOTTLE_LED, DIM_LED_BRIGHTNES);
             fillsCounter = 0;
             waitCounter = 0;
         }
         else {
             fillsCounter++;
-            analogWrite(BIG_BOTTLE_LED, 150);
         }
         break;
     case BIG_BOTTLE_WAITING_STATE:
         if (global_fill_cycles < 1) {
             dispenser_bigbottle_fill_state = BIG_BOTTLE_STOP_STATE;
-            
             digitalWrite(SOLENOID_VALVE_PIN, LOW);
             analogWrite(BIG_BOTTLE_LED, 0);
-            writeIntToEEPROM(0, global_fill_cycles);
-            Serial.print("global_fill_cycles: ");
-            Serial.println(global_fill_cycles);
-
         }
         else {
             if (waitCounter >= NUMBER_OFF_WATER_PAUSE_DURATION) {
-                digitalWrite(SOLENOID_VALVE_PIN, LOW);
-                analogWrite(BIG_BOTTLE_LED, 100);
                 dispenser_bigbottle_fill_state = BIG_BOTTLE_STOP_STATE;
             }
             else {
